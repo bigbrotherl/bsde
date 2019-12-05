@@ -27,37 +27,19 @@ class FeedForwardModel(object):
         self.start_time = time.time()
     
         dw_valid,x_valid = self.bsde.sample(self.config.valid_size)
-        feed_dict_valid = {self._x: x_valid,self._dw:dw_valid,
-                           self.lambda1:1,self.lambda2:0, 
-                           self._is_training: False}
-        
-        loss = 1000
-        counter = 1
-        
-#         while loss > 10:
-#             print('the '+str(counter)+' time of pre-train')
-#             self._sess.run(tf.global_variables_initializer())
-#             for step in range(self.config.pre_train_num_iteration+1):
-#                 if step % self.config.logging_frequency == 0:
-#                     loss= self._sess.run(self._loss, feed_dict = feed_dict_valid)
-#                     elapsed_time = time.time() - self.start_time + self._t_build
-#                     print("step: %5u,loss: %.4e,  elapsed time %3u" % (step, loss, elapsed_time))
-#                 dw_train, x_train = self.bsde.sample(self.config.batch_size)
-#                 loss = self._sess.run([self._loss ,self._train_ops], 
-#                                     feed_dict={self._x: x_train, self._dw:dw_train, self.lambda1:1,
-#                                                self.lambda2:0, self._is_training: True})[0]
-#             counter+=1
-#         print('Finish pre train')
         
         feed_dict_valid = {self._x: x_valid, self._dw:dw_valid, 
                            self.lambda1: 0, self.lambda2: 1, self._is_training: False}
+        
         self._sess.run(tf.global_variables_initializer())
         
         for step in range(self.config.num_iterations + 1):
             if step % self.config.logging_frequency == 0:
-                loss, init = self._sess.run([self._loss, self._y_init], feed_dict=feed_dict_valid)
+                loss, init, lower = self._sess.run([self._loss, self._y_init, self._lower], feed_dict=feed_dict_valid)
+#                 loss, i, y, q = self._sess.run([self._loss, self._i, self._y, self._q], feed_dict=feed_dict_valid)
                 elapsed_time = time.time() - self.start_time + self._t_build
-                print("step: %5u,loss: %.4e,y_init: %.4e  elapsed time %3u" % (step, loss, init, elapsed_time))
+                print("step: %5u,loss: %.4e,y_init: %.4e, y_lower: %.4e  elapsed time %3u" % (step, loss, init, lower, elapsed_time))
+#                 print(y[0:5], i[0:5], q[0:5])
             dw_train,x_train = self.bsde.sample(self.config.batch_size)
             loss=self._sess.run([self._loss ,self._train_ops], 
                                 feed_dict={self._x: x_train,self._dw:dw_train,self.lambda1:0,
@@ -100,7 +82,6 @@ class FeedForwardModel(object):
                                                      minval=self.config.y_init_range[0],
                                                      maxval=self.config.y_init_range[1],
                                                      dtype=TF_DTYPE))
-
 #         x = np.linspace(self.bsde.lower, self.bsde.upper, self.config.ob_num)
 #         self.x = tf.constant(x, dtype=TF_DTYPE, shape=[1, self.config.ob_num, 1])
 
@@ -108,7 +89,11 @@ class FeedForwardModel(object):
             z = self.nn_structure(self.z_network[0], self._x[:,:,0])
             
             all_one_vec = tf.ones(shape=tf.stack([tf.shape(self._dw)[0], 1]), dtype=TF_DTYPE)
+            all_zero_vec = tf.zeros(shape=tf.stack([tf.shape(self._dw)[0], 1]), dtype=TF_DTYPE)
             y = all_one_vec * self._y_init
+            
+            i = all_zero_vec
+            q = all_zero_vec
             
             for t in range(0, self.num_time_interval - 1):
                 y = y - self.delta_t * (
@@ -117,14 +102,28 @@ class FeedForwardModel(object):
                 y = y + tf.reduce_sum(z * self.bsde._sigma * self._x[:, :, t]
                 * self._dw[:, :, t], 1, keepdims=True)
                 
+                a_star = self.bsde.a_star(time_stamp[t], self._x[:, :, t], y, z)
+                q = q + tf.exp(i) * self.bsde.f_star(time_stamp[t], self._x[:, :, t], y, z)
+                i = i + self.delta_t * (a_star)
+                
                 z = self.nn_structure(self.z_network[ t+1 ], self._x[:, :, t + 1])
                        
-            
-
-            y = y - self.bsde.delta_t * self.bsde.f_tf(
+            y = y - self.bsde._delta_t * self.bsde.f_tf(
                 time_stamp[-1], self._x[:, :, -2], y, z)
             y = y + tf.reduce_sum(z * self.bsde._sigma *self._x[:, :, -2]
                 * self._dw[:, :, -1], 1, keepdims=True)
+            
+            a_star = self.bsde.a_star(time_stamp[-1], self._x[:, :, -2], y, z)
+            q = q + tf.exp(i) * self.bsde.f_star(time_stamp[t], self._x[:, :, t], y, z)
+            i = i + self.delta_t * (a_star)
+            self._i = i
+            self._y = y
+            self._q = q
+            
+            temp = tf.exp(i) * self.bsde.g_tf(self.total_time, self._x[:, :, -1]) - q
+            self._lower = (tf.reduce_mean(temp))
+            
+            
             
          #   loss1 = y_init - self.bsde.g_tf(0, self._x[:, :, 0])                  
             loss2 = y - self.bsde.g_tf(self.total_time, self._x[:, :, -1])
