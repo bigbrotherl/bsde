@@ -4,7 +4,7 @@ import numpy as np
 class Config(object):
     n_layer = 4
     batch_size = 512
-    valid_size = 256
+    valid_size = 1024 * 8
     step_boundaries = [2000, 4000]
     num_iterations = 10000
     logging_frequency = 1000
@@ -41,10 +41,11 @@ class HJBConfig(Config):
     z_units = [dim + 20]*z_layernum
 
 class EuropeanCallConfig(Config):
-    num_iterations = 20000
+    num_iterations = 10000
     dim = 1
     total_time = 1
     num_time_interval = 10
+    y_init_range = [6, 12]
     lr_values = list(np.array([1e-3, 1e-3]))
     lr_boundaries = [1000]
     pre_train_num_iteration = 5000
@@ -56,16 +57,16 @@ class EuropeanCallConfig(Config):
 
 
 class PricingOptionConfig(Config):
-    dim = 100
+    dim = 5
     total_time = 0.5
     num_time_interval = 10
     lr_values = list(np.array([5e-3, 5e-3]))
     lr_boundaries = [2000]
-    num_iterations = 4000
+    num_iterations = 20000
     
     z_layernum = 10
     z_units = [dim + 20]*z_layernum
-    y_init_range = [15, 18]
+    y_init_range = [3, 7]
 
 
 class PricingDefaultRiskConfig(Config):
