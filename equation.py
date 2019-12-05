@@ -128,12 +128,46 @@ class EuropeanCall(Equation):
     def g_tf(self, t, x):
         return tf.maximum(x - self._K, 0)
 
+class EuropeanCallPrime(Equation):
+    def __init__(self, dim, total_time, num_time_interval, sigma, r, K):
+        super(EuropeanCallPrime, self).__init__(dim, total_time, num_time_interval)
+        self._sigma = sigma
+        self._r = r
+        self._K = K
+#         self.lower, self.upper = ob_range
+
+    def sample(self, num_sample):
+#        x_init = np.random.uniform(self.lower, self.upper, [ num_sample, self.dim ])
+        x_init = np.ones([ num_sample, self.dim ]) * 100.0
+        dw_sample = np.random.randn(num_sample,
+                                     self.dim,
+                                     self.num_time_interval) * self._sqrt_delta_t
+        x_sample = np.zeros([num_sample, self.dim, self.num_time_interval + 1])
+        x_sample[:, :, 0] = np.ones([num_sample, self.dim]) * x_init
+        
+        factor = np.exp( (self._r - (self._sigma**2)/2 ) * self._delta_t)
+        for i in range(self._num_time_interval):
+            x_sample[:, :, i + 1] = (factor * np.exp(self._sigma * dw_sample[:, :, i])) * x_sample[:, :, i]
+        return dw_sample, x_sample
+    
+    def f_tf(self, t, x, y, z):
+        return -self._r * y
+
+    def g_tf(self, t, x):
+        return tf.maximum(x - self._K, 0)
+    
+    def a_star(self, t, x, y, z):
+        return -self._r
+    
+    def f_star(self, t, x, y, z):
+        return 0
+    
 class PricingOption(Equation):
     def __init__(self, dim, total_time, num_time_interval):
         super(PricingOption, self).__init__(dim, total_time, num_time_interval)
         self._x_init = np.ones(self._dim) * 100
         self._sigma = 0.2
-        self._mu_bar = 0.06
+        self._mu_bar = 0.10
         self._rl = 0.04
         self._rb = 0.06
         self._alpha = 1.0 / self._dim
@@ -160,6 +194,13 @@ class PricingOption(Equation):
     def g_tf(self, t, x):
         temp = tf.reduce_max(x, 1, keepdims=True)
         return tf.maximum(temp - 120, 0) - 2 * tf.maximum(temp - 150, 0)
+    
+    def a_star(self, t, x, y, z):
+        return -self._rb
+    
+    def f_star(self, t, x, y, z):
+        temp = tf.reduce_sum(z, 1, keepdims=True) / self._sigma
+        return temp * (self._mu_bar - self._rb)
 
 
 class PricingDefaultRisk(Equation):
